@@ -16,6 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ---------------- SEARCH ----------------
 
 @app.get("/search")
@@ -66,36 +67,53 @@ async def generate_video(video_id: str):
     return {"file_id": mongo_id}
 
 
-# ---------------- STREAM AUDIO ----------------
+# ===============================
+# 🔥 ASYNC STREAM AUDIO
+# ===============================
 
 @app.get("/audio/{file_id}")
 async def stream_audio(file_id: str):
 
-    file = fs.get(ObjectId(file_id))
-    if not file:
+    try:
+        stream = await fs.open_download_stream(ObjectId(file_id))
+    except Exception:
         raise HTTPException(404, "Audio not found")
 
+    async def file_iterator():
+        while chunk := await stream.read(1024 * 1024):
+            yield chunk
+
     return StreamingResponse(
-        file,
+        file_iterator(),
         media_type="audio/mpeg",
         headers={"Accept-Ranges": "bytes"},
     )
 
 
-# ---------------- STREAM VIDEO ----------------
+# ===============================
+# 🔥 ASYNC STREAM VIDEO
+# ===============================
 
 @app.get("/video/{file_id}")
 async def stream_video(file_id: str):
 
-    file = fs.get(ObjectId(file_id))
-    if not file:
+    try:
+        stream = await fs.open_download_stream(ObjectId(file_id))
+    except Exception:
         raise HTTPException(404, "Video not found")
 
+    async def file_iterator():
+        while chunk := await stream.read(1024 * 1024):
+            yield chunk
+
     return StreamingResponse(
-        file,
+        file_iterator(),
         media_type="video/mp4",
         headers={"Accept-Ranges": "bytes"},
     )
+
+
+# ---------------- INIT INDEXES ----------------
 
 @app.on_event("startup")
 async def startup():
