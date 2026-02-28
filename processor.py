@@ -5,7 +5,8 @@ from mongo import fs, get_existing_file
 from YouTubeMusic.Stream import get_stream
 from YouTubeMusic.Video_Stream import get_video_audio_urls, stream_merged
 
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+COOKIE_PATH = os.path.join(BASE_DIR, "cookies.txt")
 # =========================
 # 🎵 AUDIO PROCESS (MP3)
 # =========================
@@ -20,7 +21,7 @@ async def process_audio(video_url: str, video_id: str):
         return str(existing["_id"])
 
     # 🎧 Get direct audio stream URL
-    stream_url = await get_stream(video_url, "cookies.txt")
+    stream_url = await get_stream(video_url, COOKIE_PATH)
     if not stream_url:
         return None
 
@@ -76,7 +77,7 @@ async def process_video(video_url: str, video_id: str):
         return str(existing["_id"])
 
     # 🎬 Get separate streams
-    video_stream, audio_stream = await get_video_audio_urls(video_url, "cookies.txt")
+    video_stream, audio_stream = await get_video_audio_urls(video_url, COOKIE_PATH)
     if not video_stream or not audio_stream:
         return None
 
