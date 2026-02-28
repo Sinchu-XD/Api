@@ -5,8 +5,14 @@ from mongo import fs, get_existing_file
 from YouTubeMusic.Stream import get_stream
 from YouTubeMusic.Video_Stream import get_video_audio_urls, stream_merged
 
+# =========================
+# 🔒 COOKIE PATH (ABSOLUTE)
+# =========================
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_PATH = os.path.join(BASE_DIR, "cookies.txt")
+
+
 # =========================
 # 🎵 AUDIO PROCESS (MP3)
 # =========================
@@ -15,7 +21,7 @@ async def process_audio(video_url: str, video_id: str):
 
     filename = f"{video_id}.mp3"
 
-    # 🔎 Duplicate Check (Async)
+    # 🔎 Duplicate Check
     existing = await get_existing_file(filename)
     if existing:
         return str(existing["_id"])
@@ -23,7 +29,7 @@ async def process_audio(video_url: str, video_id: str):
     # 🎧 Get direct audio stream URL
     stream_url = await get_stream(video_url, COOKIE_PATH)
     if not stream_url:
-        return None
+        raise Exception("Failed to extract audio stream")
 
     output_file = f"/tmp/{uuid.uuid4()}.mp3"
 
@@ -44,21 +50,25 @@ async def process_audio(video_url: str, video_id: str):
     await process.communicate()
 
     if process.returncode != 0:
-        return None
+        raise Exception("FFmpeg audio conversion failed")
 
-    # 📦 Upload to Mongo (Async GridFS)
-    async with await fs.open_upload_stream(
+    # 📦 Upload to Mongo GridFS
+    upload_stream = await fs.open_upload_stream(
         filename,
         metadata={"contentType": "audio/mpeg"}
-    ) as upload_stream:
+    )
 
+    try:
         with open(output_file, "rb") as f:
             while chunk := f.read(1024 * 1024):
                 await upload_stream.write(chunk)
 
         file_id = upload_stream._id
 
-    os.remove(output_file)
+    finally:
+        await upload_stream.close()
+        if os.path.exists(output_file):
+            os.remove(output_file)
 
     return str(file_id)
 
@@ -71,20 +81,24 @@ async def process_video(video_url: str, video_id: str):
 
     filename = f"{video_id}.mp4"
 
-    # 🔎 Duplicate Check (Async)
+    # 🔎 Duplicate Check
     existing = await get_existing_file(filename)
     if existing:
         return str(existing["_id"])
 
     # 🎬 Get separate streams
-    video_stream, audio_stream = await get_video_audio_urls(video_url, COOKIE_PATH)
-    if not video_stream or not audio_stream:
-        return None
+    video_stream, audio_stream = await get_video_audio_urls(
+        video_url,
+        COOKIE_PATH
+    )
 
-    # 🔥 Merge using stream_merged (pipe output)
+    if not video_stream or not audio_stream:
+        raise Exception("Failed to extract video/audio streams")
+
+    # 🔥 Merge streams using ffmpeg pipe
     process = await stream_merged(video_stream, audio_stream)
     if not process:
-        return None
+        raise Exception("FFmpeg merge process failed to start")
 
     # 📦 Upload directly from pipe to Mongo
     upload_stream = await fs.open_upload_stream(
@@ -94,7 +108,7 @@ async def process_video(video_url: str, video_id: str):
 
     try:
         while True:
-            chunk = await process.stdout.read(1024 * 1024)  # 1MB
+            chunk = await process.stdout.read(1024 * 1024)
             if not chunk:
                 break
             await upload_stream.write(chunk)
@@ -102,14 +116,11 @@ async def process_video(video_url: str, video_id: str):
         await process.wait()
 
         if process.returncode != 0:
-            await upload_stream.close()
-            return None
+            raise Exception("FFmpeg video merge failed")
 
         file_id = upload_stream._id
+
+    finally:
         await upload_stream.close()
 
-        return str(file_id)
-
-    except Exception:
-        await upload_stream.close()
-        return None
+    return str(file_id)
