@@ -20,7 +20,7 @@ async def process_audio(video_url: str, video_id: str):
         return str(existing["_id"])
 
     # 🎧 Get direct audio stream URL
-    stream_url = await get_stream(video_url)
+    stream_url = await get_stream(video_url, "cookies.txt")
     if not stream_url:
         return None
 
@@ -76,7 +76,7 @@ async def process_video(video_url: str, video_id: str):
         return str(existing["_id"])
 
     # 🎬 Get separate streams
-    video_stream, audio_stream = await get_video_audio_urls(video_url)
+    video_stream, audio_stream = await get_video_audio_urls(video_url, "cookies.txt")
     if not video_stream or not audio_stream:
         return None
 
