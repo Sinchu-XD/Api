@@ -96,3 +96,8 @@ async def stream_video(file_id: str):
         media_type="video/mp4",
         headers={"Accept-Ranges": "bytes"},
     )
+
+@app.on_event("startup")
+async def startup():
+    from mongo import init_indexes
+    await init_indexes()
