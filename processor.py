@@ -1,7 +1,7 @@
 import asyncio
 import os
 import uuid
-from mongo import fs
+from mongo import fs, get_existing_file
 from YouTubeMusic.Stream import get_stream
 from YouTubeMusic.Video_Stream import get_video_audio_urls, stream_merged
 
@@ -12,10 +12,12 @@ from YouTubeMusic.Video_Stream import get_video_audio_urls, stream_merged
 
 async def process_audio(video_url: str, video_id: str):
 
-    # 🔎 Duplicate Check
-    existing = fs.find_one({"filename": f"{video_id}.mp3"})
+    filename = f"{video_id}.mp3"
+
+    # 🔎 Duplicate Check (Async)
+    existing = await get_existing_file(filename)
     if existing:
-        return str(existing._id)
+        return str(existing["_id"])
 
     # 🎧 Get direct audio stream URL
     stream_url = await get_stream(video_url)
@@ -43,15 +45,20 @@ async def process_audio(video_url: str, video_id: str):
     if process.returncode != 0:
         return None
 
-    # 📦 Store in Mongo
-    with open(output_file, "rb") as f:
-        file_id = fs.put(
-            f,
-            filename=f"{video_id}.mp3",
-            content_type="audio/mpeg"
-        )
+    # 📦 Upload to Mongo (Async GridFS)
+    async with await fs.open_upload_stream(
+        filename,
+        metadata={"contentType": "audio/mpeg"}
+    ) as upload_stream:
+
+        with open(output_file, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                await upload_stream.write(chunk)
+
+        file_id = upload_stream._id
 
     os.remove(output_file)
+
     return str(file_id)
 
 
@@ -61,12 +68,14 @@ async def process_audio(video_url: str, video_id: str):
 
 async def process_video(video_url: str, video_id: str):
 
-    # 🔎 Duplicate Check
-    existing = fs.find_one({"filename": f"{video_id}.mp4"})
-    if existing:
-        return str(existing._id)
+    filename = f"{video_id}.mp4"
 
-    # 🎬 Get separate video + audio URLs
+    # 🔎 Duplicate Check (Async)
+    existing = await get_existing_file(filename)
+    if existing:
+        return str(existing["_id"])
+
+    # 🎬 Get separate streams
     video_stream, audio_stream = await get_video_audio_urls(video_url)
     if not video_stream or not audio_stream:
         return None
@@ -76,30 +85,30 @@ async def process_video(video_url: str, video_id: str):
     if not process:
         return None
 
-    # 📦 Store merged MP4 directly from pipe into Mongo
-    file = fs.new_file(
-        filename=f"{video_id}.mp4",
-        content_type="video/mp4"
+    # 📦 Upload directly from pipe to Mongo
+    upload_stream = await fs.open_upload_stream(
+        filename,
+        metadata={"contentType": "video/mp4"}
     )
 
     try:
         while True:
-            chunk = await process.stdout.read(1024 * 1024)  # 1MB chunk
+            chunk = await process.stdout.read(1024 * 1024)  # 1MB
             if not chunk:
                 break
-            file.write(chunk)
+            await upload_stream.write(chunk)
 
         await process.wait()
 
         if process.returncode != 0:
-            file.close()
-            fs.delete(file._id)
+            await upload_stream.close()
             return None
 
-        file.close()
-        return str(file._id)
+        file_id = upload_stream._id
+        await upload_stream.close()
+
+        return str(file_id)
 
     except Exception:
-        file.close()
-        fs.delete(file._id)
+        await upload_stream.close()
         return None
