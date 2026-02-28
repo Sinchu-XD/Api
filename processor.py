@@ -52,8 +52,8 @@ async def process_audio(video_url: str, video_id: str):
     if process.returncode != 0:
         raise Exception("FFmpeg audio conversion failed")
 
-    # 📦 Upload to Mongo GridFS
-    upload_stream = await fs.open_upload_stream(
+    # 📦 Upload to Mongo GridFS (NO AWAIT HERE)
+    upload_stream = fs.open_upload_stream(
         filename,
         metadata={"contentType": "audio/mpeg"}
     )
@@ -100,8 +100,8 @@ async def process_video(video_url: str, video_id: str):
     if not process:
         raise Exception("FFmpeg merge process failed to start")
 
-    # 📦 Upload directly from pipe to Mongo
-    upload_stream = await fs.open_upload_stream(
+    # 📦 Upload to Mongo GridFS (NO AWAIT HERE)
+    upload_stream = fs.open_upload_stream(
         filename,
         metadata={"contentType": "video/mp4"}
     )
